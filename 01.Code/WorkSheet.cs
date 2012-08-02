@@ -75,21 +75,12 @@ namespace NPOI.Wrapper
             List<string> vFormats = new List<string>();
 
             bool IsList = false;
-            for (int rowIndex = rowIndexMin; rowIndex <= rowIndexMax; rowIndex++)
-            {
-                IRow row = this.sheetHandler.GetRow(rowIndex);
-                if (row == null)
-                {
-                    continue;
-                }
-
+            IEnumerator rows = this.sheetHandler.GetRowEnumerator();
+            while (rows.MoveNext())
+            {//Enumerate All Cells To Find The Template TAG
+                IRow row = rows.Current as IRow;
                 foreach (ICell cell in row.Cells)
                 {
-                    if (cell == null)
-                    {
-                        continue;
-                    }
-
                     string vTemplate = cell.StringCellValue;
                     vTemplate.Replace(" ", "");
                     if (!(vTemplate.Length >= 4 && vTemplate.IndexOf('{') == 0 && vTemplate.LastIndexOf('}') == vTemplate.Length - 1))
@@ -138,7 +129,7 @@ namespace NPOI.Wrapper
             if (vContext != null)
             {
                 int rowStepOffSet = 0;
-                {
+                {//Calculate the rowSetpOffset to Fit dumplicate rows TAG.
                     int rowIndexStart = 0;
                     int rowIndexStop = 0;
                     for (int i = 0; i < vCells.Count; i++)
@@ -162,12 +153,12 @@ namespace NPOI.Wrapper
                 }
 
                 IList vList = vContext as IList;
-                for (int i = 0; i < vList.Count; i += rowStepOffSet)
+                for (int i = 0; i < vList.Count; i++)
                 {
                     for (int c = 0; c < vCells.Count; c++)
                     {
                         this.SetValue(
-                            vCells[c].RowIndex + i, vCells[c].ColumnIndex,
+                            vCells[c].RowIndex + i * rowStepOffSet, vCells[c].ColumnIndex,
                             vProperties[c].GetValue(vList[i], null), vFormats[c]
                             );
                     }
