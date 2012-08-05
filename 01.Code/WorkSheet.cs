@@ -73,6 +73,8 @@ namespace NPOI.Wrapper
             List<PropertyInfo> vProperties = new List<PropertyInfo>();
             List<ICell> vCells = new List<ICell>();
             List<string> vFormats = new List<string>();
+            //Contents Except Tag
+            List<ICell> vContents = new List<ICell>();
 
             bool IsList = false;
             IEnumerator rows = this.sheetHandler.GetRowEnumerator();
@@ -82,12 +84,14 @@ namespace NPOI.Wrapper
                 foreach (ICell cell in row.Cells)
                 {
                     string vTemplate = cell.StringCellValue;
-                    vTemplate.Replace(" ", "");
                     if (!(vTemplate.Length >= 4 && vTemplate.IndexOf('{') == 0 && vTemplate.LastIndexOf('}') == vTemplate.Length - 1))
                     {
-                        vTemplate = null; continue;
+                        vContents.Add(cell);
+                        vTemplate = null; 
+                        continue;
                     }
 
+                    vTemplate = vTemplate.Replace(" ", "");
                     string pName = vTemplate.Substring(1, vTemplate.Length - 2);
                     string vFormat = "";
                     int formatIndex = vTemplate.LastIndexOf(':');
@@ -114,9 +118,7 @@ namespace NPOI.Wrapper
                             throw new Exception(string.Format("Context Error [{0}]@[R[{1}],C[{2}]"));
                         }
 
-                        vCells.Add(cell);
-                        vProperties.Add(p);
-                        vFormats.Add(vFormat);
+                        vCells.Add(cell); vProperties.Add(p); vFormats.Add(vFormat);
                     }
                     else
                     {
@@ -126,52 +128,85 @@ namespace NPOI.Wrapper
                 }
             }
 
-            if (vContext != null)
+            if (vContext == null)
             {
-                int rowStepOffSet = 0;
-                {//Calculate the rowSetpOffset to Fit dumplicate rows TAG.
-                    int rowIndexStart = 0;
-                    int rowIndexStop = 0;
-                    for (int i = 0; i < vCells.Count; i++)
-                    {
-                        if (i == 0)
-                        {
-                            rowIndexStart = vCells[i].RowIndex;
-                            rowIndexStop = vCells[i].RowIndex;
-                        }
+                return;
+            }
 
-                        if (vCells[i].RowIndex < rowIndexStart)
-                        {
-                            rowIndexStart = vCells[i].RowIndex;
-                        }
-                        if (vCells[i].RowIndex > rowIndexStop)
-                        {
-                            rowIndexStop = vCells[i].RowIndex;
-                        }
+            int rowStepOffSet = 0;
+            int rowIndexStart = 0;
+            int rowIndexStop = 0;
+            {//Calculate the rowSetpOffset to Fit dumplicate rows TAG.
+                for (int i = 0; i < vCells.Count; i++)
+                {
+                    if (i == 0)
+                    {
+                        rowIndexStart = vCells[i].RowIndex;
+                        rowIndexStop = vCells[i].RowIndex;
                     }
-                    rowStepOffSet = rowIndexStop - rowIndexStart + 1;
+
+                    if (vCells[i].RowIndex < rowIndexStart)
+                    {
+                        rowIndexStart = vCells[i].RowIndex;
+                    }
+                    if (vCells[i].RowIndex > rowIndexStop)
+                    {
+                        rowIndexStop = vCells[i].RowIndex;
+                    }
+                }
+                rowStepOffSet = rowIndexStop - rowIndexStart + 1;
+            }
+
+            for (int i = 0; i < vContents.Count; i++)
+            {
+                if (vContents[i].RowIndex < rowIndexStart || vContents[i].RowIndex > rowIndexStop)
+                {
+                    vContents.RemoveAt(i); i--;
+                }
+            }
+
+            IList vList = vContext as IList;
+            for (int i = 0; i < vList.Count; i++)
+            {
+                for (int c = 0; c < vContents.Count; c++)
+                {
+                    this.SetValue(
+                        vContents[c],
+                        vContents[c].RowIndex + i * rowStepOffSet, vContents[c].ColumnIndex
+                        );
                 }
 
-                IList vList = vContext as IList;
-                for (int i = 0; i < vList.Count; i++)
+                for (int c = 0; c < vCells.Count; c++)
                 {
-                    for (int c = 0; c < vCells.Count; c++)
-                    {
-                        this.SetValue(
-                            vCells[c].RowIndex + i * rowStepOffSet, vCells[c].ColumnIndex,
-                            vProperties[c].GetValue(vList[i], null), vFormats[c]
-                            );
-                    }
+                    this.SetValue(
+                        vProperties[c].GetValue(vList[i], null), vFormats[c],
+                        vCells[c].RowIndex + i * rowStepOffSet, vCells[c].ColumnIndex);
                 }
             }
         }
 
-        public void SetValue(int rowIndex, int colIndex, object v)
+        public void SetValue(object v, int rowIndex, int colIndex)
         {
-            this.SetValue(rowIndex, colIndex, v, null);
+            this.SetValue(v, null, rowIndex, colIndex);
         }
 
-        public void SetValue(int rowIndex, int colIndex, object v,string format)
+        public void SetValue(object v, string format, int rowIndex, int colIndex)
+        {
+            this.SetValue(this.GetCell(rowIndex, colIndex), v, format);
+        }
+
+        public void SetValue(ICell cell, object v, string format)
+        {
+            Cell.SetValue(cell, v, format);
+        }
+
+        public void SetValue(ICell cell, int rowIndex, int colIndex)
+        {
+            ICell cell2Set = this.GetCell(rowIndex, colIndex);
+            Cell.SetValue(cell, cell2Set);
+        }
+
+        public ICell GetCell(int rowIndex, int colIndex)
         {
             IRow row = this.sheetHandler.GetRow(rowIndex);
             if (row == null)
@@ -185,12 +220,7 @@ namespace NPOI.Wrapper
                 cell = row.CreateCell(colIndex);
             }
 
-            this.SetValue(cell, v, format);
-        }
-
-        public void SetValue(ICell cell, object v, string format)
-        {
-            Cell.SetValue(cell, v, format);
+            return cell;
         }
 
         public static int GetColIndexByName(string colName)

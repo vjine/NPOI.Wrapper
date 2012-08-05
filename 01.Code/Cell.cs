@@ -89,6 +89,35 @@ namespace NPOI.Wrapper
                     );
             }
         }
+
+        public static void SetValue(ICell srcCell, ICell dstCell)
+        {
+            dstCell.SetCellType(srcCell.CellType);
+            dstCell.CellStyle = srcCell.CellStyle;
+            
+            switch (srcCell.CellType)
+            {
+                case CellType.ERROR:
+                    dstCell.SetCellErrorValue(srcCell.ErrorCellValue);
+                    break;
+                case CellType.BLANK:
+                    break;
+                case CellType.FORMULA:
+                    dstCell.SetCellFormula(srcCell.CellFormula);
+                    break;
+                case CellType.BOOLEAN:
+                    dstCell.SetCellValue(srcCell.BooleanCellValue);
+                    break;
+                case CellType.NUMERIC:
+                    dstCell.SetCellValue(srcCell.NumericCellValue);
+                    break;
+                case CellType.STRING:
+                    dstCell.SetCellValue(srcCell.StringCellValue);
+                    break;
+                case CellType.Unknown:
+                    break;
+            }
+        }
     }
 
     public class CellCollection : Dictionary<string, Cell>
