@@ -1,9 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using NPOI.SS.UserModel;
-using System.Reflection;
 using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using NPOI.SS.UserModel;
 
 namespace NPOI.Wrapper
 {
@@ -11,9 +11,12 @@ namespace NPOI.Wrapper
     {
         internal IWorkbook bookHandler = null;
         internal ISheet sheetHandler = null;
-        internal WorkSheet(ISheet sheetHandler)
+        internal WorkSheet(IWorkbook bookHandler, ISheet sheetHandler)
         {
-            this.Cells = new CellCollection() { sheetHandler = sheetHandler };
+            this.bookHandler = bookHandler;
+            this.sheetHandler = sheetHandler;
+
+            this.Cells = new CellCollection() { Sheet = this };
         }
 
         public string Name
@@ -28,6 +31,26 @@ namespace NPOI.Wrapper
             }
         }
 
+        public Range UsedRange
+        {
+            get
+            {
+                Range _Used = new Range();
+                _Used.Top = this.sheetHandler.FirstRowNum;
+                _Used.Bottom = this.sheetHandler.LastRowNum;
+                IRow rowTop = this.sheetHandler.GetRow(_Used.Top);
+                IRow rowBottom = this.sheetHandler.GetRow(_Used.Bottom);
+                _Used.Left =
+                    rowTop.FirstCellNum < rowBottom.FirstCellNum ? rowTop.FirstCellNum : rowBottom.FirstCellNum;
+                _Used.Right =
+                    rowTop.LastCellNum > rowBottom.LastCellNum ? rowTop.LastCellNum : rowBottom.LastCellNum;
+
+                _Used.Right -= 1;
+
+                return _Used;
+            }
+        }
+
         public int Index
         {
             get
@@ -36,7 +59,11 @@ namespace NPOI.Wrapper
             }
             set
             {
-                this.bookHandler.SetSheetOrder(this.sheetHandler.SheetName, value - 1);
+                if (Index < 0 || Index > this.bookHandler.NumberOfSheets -1)
+                {
+                    throw new WrapperException("索引不在范围内【[0,{0}]】", this.bookHandler.NumberOfSheets - 1);
+                }
+                this.bookHandler.SetSheetOrder(this.sheetHandler.SheetName, value);
             }
         }
 
@@ -61,6 +88,77 @@ namespace NPOI.Wrapper
         public RowCollection Rows { get; private set; }
 
         public ColumnCollection Columns { get; private set; }
+
+        public void SetValue(object v, int rowIndex, int colIndex)
+        {
+            this.SetValue(v, null, rowIndex, colIndex);
+        }
+
+        public void SetValue(object v, string format, int rowIndex, int colIndex)
+        {
+            this.SetValue(WorkSheet.GetCell(this.sheetHandler, rowIndex, colIndex, true), v, format);
+        }
+
+        internal void SetValue(ICell cell, object v, string format)
+        {
+            Cell.SetValue(cell, v, format);
+        }
+
+        internal ICell SetValue(ICell cell, int rowIndex, int colIndex)
+        {
+            ICell cell2Set = WorkSheet.GetCell(this.sheetHandler, rowIndex, colIndex, true);
+            return Cell.SetValue(cell, cell2Set);
+        }
+
+        internal static IRow GetRow(ISheet sheetHandler, int rowIndex)
+        {
+            return GetRow(sheetHandler, rowIndex, false);
+        }
+
+        internal static IRow GetRow(ISheet sheetHandler, int rowIndex, bool Create)
+        {
+            IRow row = sheetHandler.GetRow(rowIndex);
+            if (row == null)
+            {
+                if (Create)
+                {
+                    row = sheetHandler.CreateRow(rowIndex);
+                }
+                else
+                {
+                    return null;
+                }
+            }
+
+            return row;
+        }
+
+        internal static ICell GetCell(ISheet sheetHandler, int rowIndex, int colIndex)
+        {
+            return GetCell(sheetHandler, rowIndex, colIndex, false);
+        }
+
+        internal static ICell GetCell(ISheet sheetHandler, int rowIndex, int colIndex, bool Create)
+        {
+            IRow row = WorkSheet.GetRow(sheetHandler, rowIndex, Create);
+
+            ICell cell = row.GetCell(colIndex);
+            if (cell == null)
+            {
+                if (Create)
+                {
+                    cell = row.CreateCell(colIndex);
+                }
+                else
+                {
+                    return null;
+                }
+            }
+
+            return cell;
+        }
+
+        #region Template
 
         public void Set(object obj)
         {
@@ -87,7 +185,7 @@ namespace NPOI.Wrapper
                     if (!(vTemplate.Length >= 4 && vTemplate.IndexOf('{') == 0 && vTemplate.LastIndexOf('}') == vTemplate.Length - 1))
                     {
                         vContents.Add(cell);
-                        vTemplate = null; 
+                        vTemplate = null;
                         continue;
                     }
 
@@ -185,47 +283,67 @@ namespace NPOI.Wrapper
             }
         }
 
-        public void SetValue(object v, int rowIndex, int colIndex)
+        public void Copy(Range srcRange, Range dstRange)
         {
-            this.SetValue(v, null, rowIndex, colIndex);
-        }
+            bool IsRowShift = Range.IsRowShift(srcRange, dstRange);
+            bool IsColShift = Range.IsColShift(srcRange, dstRange);
 
-        public void SetValue(object v, string format, int rowIndex, int colIndex)
-        {
-            this.SetValue(this.GetCell(rowIndex, colIndex), v, format);
-        }
-
-        public void SetValue(ICell cell, object v, string format)
-        {
-            Cell.SetValue(cell, v, format);
-        }
-
-        public void SetValue(ICell cell, int rowIndex, int colIndex)
-        {
-            ICell cell2Set = this.GetCell(rowIndex, colIndex);
-            Cell.SetValue(cell, cell2Set);
-        }
-
-        public ICell GetCell(int rowIndex, int colIndex)
-        {
-            IRow row = this.sheetHandler.GetRow(rowIndex);
-            if (row == null)
+            for (int rowIndex = srcRange.Top; rowIndex <= srcRange.Bottom; rowIndex++)
             {
-                row = this.sheetHandler.CreateRow(rowIndex);
+                int dstRowIndex = rowIndex - srcRange.Top + dstRange.Top;
+                IRow srcRow = WorkSheet.GetRow(this.sheetHandler, rowIndex);
+                if (srcRow == null)
+                {
+                    continue;
+                }
+                IRow dstRow = WorkSheet.GetRow(this.sheetHandler, dstRowIndex, true);
+                if (IsRowShift)
+                {
+                    dstRow.Height = srcRow.Height;
+                }
+
+                for (int colIndex = srcRange.Left; colIndex <= srcRange.Right; colIndex++)
+                {
+                    int dstColIndex = colIndex - srcRange.Left + dstRange.Left;
+                    ICell srcCell = srcRow.GetCell(colIndex);
+                    ICell dstCell = this.SetValue(srcCell, dstRowIndex, dstColIndex);
+
+                    if (IsColShift)
+                    {
+                        this.sheetHandler.SetColumnWidth(dstColIndex, this.sheetHandler.GetColumnWidth(colIndex));
+                    }
+                }
+            }
+        }
+
+        public void Copy(Range srcRange, Cell dstCell)
+        {
+            
+        }
+
+        public void Clear(Range R)
+        {
+            this.Cells.Reset();
+
+            this.Cells.EnumerateRange = R;
+            IEnumerator<Cell> cells2Clear = this.Cells.GetEnumerator();
+            while (cells2Clear.MoveNext())
+            {
+                cells2Clear.Current.cellHandler.Row.RemoveCell(cells2Clear.Current.cellHandler);
             }
 
-            ICell cell = row.GetCell(colIndex);
-            if (cell == null)
-            {
-                cell = row.CreateCell(colIndex);
-            }
-
-            return cell;
+            this.Cells.Reset();
         }
+        #endregion Template
 
         public static int GetColIndexByName(string colName)
         {
             colName = colName.ToUpper();
+            if (!Regex.IsMatch(colName, "^[A-Z]$"))
+            {
+                throw new WrapperException("列名【{0}】无效", colName);
+            }
+            
             int colIndex = 0;
             int charIndex = 0;
             for (int i = 0; i < colName.Length; i++)
@@ -234,7 +352,7 @@ namespace NPOI.Wrapper
                 colIndex += (int)Math.Pow(26, i) * (colName[charIndex] - 'A' + 1);
             }
 
-            return colIndex;
+            return colIndex - 1;
         }
     }
 }

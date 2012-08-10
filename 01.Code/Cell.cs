@@ -2,12 +2,17 @@
 using System.Collections.Generic;
 using System.Text;
 using NPOI.SS.UserModel;
+using System.Collections;
 
 namespace NPOI.Wrapper
 {
     public class Cell
     {
-        internal ICell cellHandler = null;
+        internal Cell()
+        {
+        }
+
+        internal ICell cellHandler { get; set; }
 
         public string Value
         {
@@ -37,61 +42,85 @@ namespace NPOI.Wrapper
             }
         }
 
-        public static void SetValue(ICell cell, object v, string format)
+        public Cell SetValue(object V)
         {
-            if (cell.CellType == CellType.Unknown || cell.CellType == CellType.BLANK || cell.CellType == CellType.STRING)
+            Cell.SetValue(this.cellHandler, V, null);
+            return this;
+        }
+
+        public Cell SetValue(object V, string format)
+        {
+            Cell.SetValue(this.cellHandler, V, format);
+            return this;
+        }
+
+        public static Cell SetValue(Cell srcCell, Cell dstDell)
+        {
+            Cell.SetValue(srcCell.cellHandler, dstDell.cellHandler);
+            return dstDell;
+        }
+
+        internal static void SetValue(ICell dstCell, object v, string format)
+        {
+            if (dstCell.CellType == CellType.Unknown || dstCell.CellType == CellType.BLANK || dstCell.CellType == CellType.STRING)
             {
                 if (string.IsNullOrEmpty(format))
                 {
-                    cell.SetCellValue(v.ToString());
+                    dstCell.SetCellValue(v.ToString());
                 }
                 else
                 {
-                    cell.SetCellValue(string.Format("{0:" + format + "}", v));
+                    dstCell.SetCellValue(string.Format("{0:" + format + "}", v));
                 }
             }
-            else if (cell.CellType == CellType.BOOLEAN)
+            else if (dstCell.CellType == CellType.BOOLEAN)
             {
                 bool bValue = false;
                 if (!bool.TryParse(v.ToString(), out bValue))
                 {
                     throw new Exception(
                         string.Format("Parse Bool Value Error:{0} On R[{1}],C[{2}]",
-                        v, cell.Row, cell.ColumnIndex));
+                        v, dstCell.Row, dstCell.ColumnIndex));
                 }
-                cell.SetCellValue(bValue);
+                dstCell.SetCellValue(bValue);
             }
-            else if (cell.CellType == CellType.NUMERIC)
+            else if (dstCell.CellType == CellType.NUMERIC)
             {
                 double dbValue = 0;
                 DateTime dtValue = DateTime.Now;
 
                 if (double.TryParse(v.ToString(), out dbValue))
                 {
-                    cell.SetCellValue(dbValue);
+                    dstCell.SetCellValue(dbValue);
                 }
                 else if (DateTime.TryParse(v.ToString(), out dtValue))
                 {
-                    cell.SetCellValue(dtValue);
+                    dstCell.SetCellValue(dtValue);
                 }
                 else
                 {
                     throw new Exception(
                         string.Format("Parse Numeric And Date Value Error:{0} On R[{1}],C[{2}]", 
-                        v, cell.RowIndex, cell.ColumnIndex));
+                        v, dstCell.RowIndex, dstCell.ColumnIndex));
                 }
             }
             else
             {
                 throw new Exception(
                     string.Format("Type[{0}] Conflict To Set Value On R[{1}],C[{2}]",
-                    cell.CellType, cell.RowIndex, cell.ColumnIndex)
+                    dstCell.CellType, dstCell.RowIndex, dstCell.ColumnIndex)
                     );
             }
         }
 
-        public static void SetValue(ICell srcCell, ICell dstCell)
+        internal static ICell SetValue(ICell srcCell, ICell dstCell)
         {
+            if (srcCell == null)
+            {
+                dstCell.Row.RemoveCell(dstCell);
+                return null;
+            }
+
             dstCell.SetCellType(srcCell.CellType);
             dstCell.CellStyle = srcCell.CellStyle;
             
@@ -117,39 +146,26 @@ namespace NPOI.Wrapper
                 case CellType.Unknown:
                     break;
             }
+
+            return dstCell;
         }
     }
 
-    public class CellCollection : Dictionary<string, Cell>
+    public class CellCollection : IEnumerator<Cell>, IEnumerable<Cell>
     {
-        internal ISheet sheetHandler = null;
+        internal WorkSheet Sheet = null;
 
         public Cell this[int rowIndex, int colIndex]
         {
             get
             {
-                rowIndex--; colIndex--;
-
-                string Key = string.Format("{0}-{1}", rowIndex, colIndex);
-                if (this.ContainsKey(Key))
-                {
-                    return this[Key];
-                }
-
-                IRow row = this.sheetHandler.GetRow(rowIndex);
-                if (row == null)
-                {
-                    row = this.sheetHandler.CreateRow(rowIndex);
-                }
-                ICell cell = row.GetCell(colIndex);
+                ICell cell = WorkSheet.GetCell(this.Sheet.sheetHandler, rowIndex, colIndex, false);
                 if (cell == null)
                 {
-                    cell = row.CreateCell(colIndex);
+                    return null;
                 }
 
-                Cell C = new Cell() { cellHandler = cell };
-                this.Add(Key, C);
-                return C;
+                return new Cell() { cellHandler = cell };
             }
         }
 
@@ -160,5 +176,102 @@ namespace NPOI.Wrapper
                 return this[rowIndex, WorkSheet.GetColIndexByName(colName)];
             }
         }
+
+        #region Enumerator
+
+        int rowIndex = -1, colIndex = -1;
+        Cell _Current = null;
+        public Cell Current
+        {
+            get
+            {
+                return this._Current;
+            }
+        }
+
+        public void Dispose()
+        {
+            this.Reset();
+        }
+
+        object System.Collections.IEnumerator.Current
+        {
+            get { throw new NotImplementedException(); }
+        }
+
+        internal Range EnumerateRange { get; set; }
+        IRow row = null;
+        ICell cell = null;
+        public bool MoveNext()
+        {
+            this.cell = null;
+            if (this.EnumerateRange == null)
+            {
+                this.EnumerateRange = this.Sheet.UsedRange;
+            }
+
+            if (this.row != null)
+            {
+                goto Next_Cell;
+            }
+            if (this.rowIndex == -1)
+            {
+                this.rowIndex = this.EnumerateRange.Top - 1;
+            }
+        Next_Row: ;
+            this.rowIndex += 1;
+            if (this.rowIndex > this.EnumerateRange.Bottom)
+            {
+                return false;
+            }
+            this.row = this.Sheet.sheetHandler.GetRow(this.rowIndex);
+            if (this.row == null)
+            {
+                goto Next_Row;
+            }
+
+            if (this.colIndex == -1)
+            {
+                this.colIndex = row.FirstCellNum - 1;
+            }
+        Next_Cell: ;
+            this.colIndex += 1;
+            if (this.colIndex > this.row.LastCellNum - 1)
+            {
+                this.row = null;
+                this.colIndex = -1;
+                goto Next_Row;
+            }
+            this.cell = row.GetCell(this.colIndex);
+            if (this.cell == null)
+            {
+                goto Next_Cell;
+            }
+
+            this._Current = null;
+            this._Current = new Cell() { cellHandler = this.cell };
+
+            return true;
+        }
+
+        public void Reset()
+        {
+            this.EnumerateRange = null;
+            this.row = null;
+            this.cell = null;
+            this.rowIndex = -1;
+            this.colIndex = -1;
+        }
+
+        public IEnumerator<Cell> GetEnumerator()
+        {
+            return this as IEnumerator<Cell>;
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return this;
+        }
+        #endregion Enumerator
     }
 }

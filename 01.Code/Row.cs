@@ -15,6 +15,11 @@ namespace NPOI.Wrapper
                 return this.rowHandler.RowNum;
             }
         }
+
+        public void Remove(Cell cell)
+        {
+            this.rowHandler.RemoveCell(cell.cellHandler);
+        }
     }
 
     public class RowCollection : List<Row>
